@@ -1,0 +1,1119 @@
+//NCURoboteamDlg.cpp : 实现文件
+//
+
+#include "stdafx.h"
+#include "NCURoboteam.h"
+#include "NCURoboteamDlg.h"
+#include "afxdialogex.h"
+#include <opencv2/opencv.hpp>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/objdetect/objdetect.hpp>
+#include <string> 
+#include <iostream>
+#include <stdio.h>
+#include <sstream>
+#include <cv.h>
+#include <cxcore.h>
+#include <cvaux.h>
+#include <highgui.h>
+#include "NCURoboteam_Deal_Track.h"
+#include "DataControlDialog.h"
+#include <vector>
+
+
+
+#define Frame_Height 240
+#define Frame_Width 340
+
+using namespace cv;
+using namespace std;
+
+//Global variables 全局变量的定义
+extern Rect box;
+extern bool drawing_box;
+extern bool gotBB;
+extern bool tl;
+extern string video;
+/** Global variables */
+String face_cascade_name = "haarcascade_frontalface_default.xml";
+String eyes_cascade_name = "haarcascade_eye_tree_eyeglasses.xml";
+CascadeClassifier face_cascade;
+CascadeClassifier eyes_cascade;
+RNG rng(12345);
+
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+
+// 用于应用程序“关于”菜单项的 CAboutDlg 对话框
+
+class CAboutDlg : public CDialog
+{
+public:
+	CAboutDlg();
+
+	// 对话框数据
+	enum { IDD = IDD_ABOUTBOX };
+
+protected:
+	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV 支持
+
+	// 实现
+protected:
+	DECLARE_MESSAGE_MAP()
+};
+
+CAboutDlg::CAboutDlg() : CDialog(CAboutDlg::IDD)
+{
+}
+
+void CAboutDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialog::DoDataExchange(pDX);
+}
+
+BEGIN_MESSAGE_MAP(CAboutDlg, CDialog)
+END_MESSAGE_MAP()
+
+/*********************************************************************************/
+// CNCURoboteamDlg 对话框
+
+
+
+CNCURoboteamDlg::CNCURoboteamDlg(CWnd* pParent /*=NULL*/)
+	: CDialog(CNCURoboteamDlg::IDD, pParent)
+	, m_facedata(_T(""))
+	, m_facedata2(_T(""))
+{
+	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+}
+
+CNCURoboteamDlg::~CNCURoboteamDlg()
+{
+	delete pTD;
+}
+
+
+void CNCURoboteamDlg::DoDataExchange(CDataExchange* pDX)
+{
+	CDialog::DoDataExchange(pDX);
+	DDX_Text(pDX, IDC_Face, m_facedata);
+	DDX_Control(pDX, IDC_Face, m_FaceControl);
+	DDX_Control(pDX, IDC_ComNum, m_ComXuan);
+	DDX_Control(pDX, IDC_ComBaud, m_BodXuan);
+	DDX_Control(pDX, IDC_MSCOMM1, m_MSCom);
+	DDX_Control(pDX, IDC_Face2, m_FaceControl2);
+	DDX_Text(pDX, IDC_Face2, m_facedata2);
+	DDX_Control(pDX, IDC_ComNum2, m_ComXuan2);
+	DDX_Control(pDX, IDC_ComBaud2, m_BodXuan2);
+	DDX_Control(pDX, IDC_MSCOMM2, m_MSCom2);
+}
+
+BEGIN_MESSAGE_MAP(CNCURoboteamDlg, CDialog)
+	ON_WM_SYSCOMMAND()
+	ON_WM_PAINT()
+	ON_WM_QUERYDRAGICON()
+	ON_WM_TIMER()
+	ON_WM_MOUSEMOVE()
+	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONUP()
+	ON_BN_CLICKED(IDC_Close, &CNCURoboteamDlg::OnBnClickedClose)
+	ON_BN_CLICKED(IDC_Open, &CNCURoboteamDlg::OnBnClickedOpen)
+	ON_BN_CLICKED(IDOK, &CNCURoboteamDlg::OnBnClickedOk)
+	ON_BN_CLICKED(IDCANCEL, &CNCURoboteamDlg::OnBnClickedCancel)
+	ON_BN_CLICKED(IDC_StartProcessed, &CNCURoboteamDlg::OnBnClickedStartprocessed)
+	ON_BN_CLICKED(IDC_TrackInit, &CNCURoboteamDlg::OnBnClickedTrackinit)
+	ON_BN_CLICKED(IDC_TrackStart, &CNCURoboteamDlg::OnBnClickedTrackstart)
+	ON_BN_CLICKED(IDC_DataPanel, &CNCURoboteamDlg::OnBnClickedDatapanel)
+	ON_BN_CLICKED(IDC_COMKOU, &CNCURoboteamDlg::OnBnClickedComkou)
+	ON_BN_CLICKED(IDC_COMSend, &CNCURoboteamDlg::OnBnClickedComsend)
+	ON_BN_CLICKED(IDC_COMKOU2, &CNCURoboteamDlg::OnBnClickedComkou2)
+	ON_BN_CLICKED(IDC_COMSend2, &CNCURoboteamDlg::OnBnClickedComsend2)
+	ON_EN_CHANGE(IDC_Face, &CNCURoboteamDlg::OnEnChangeFace)
+END_MESSAGE_MAP()
+
+
+// CNCURoboteamDlg 消息处理程序
+
+BOOL CNCURoboteamDlg::OnInitDialog()
+{
+	CDialog::OnInitDialog();
+
+	// 将“关于...”菜单项添加到系统菜单中。
+
+	// IDM_ABOUTBOX 必须在系统命令范围内。
+	ASSERT((IDM_ABOUTBOX & 0xFFF0) == IDM_ABOUTBOX);
+	ASSERT(IDM_ABOUTBOX < 0xF000);
+
+	CMenu* pSysMenu = GetSystemMenu(FALSE);
+	if (pSysMenu != NULL)
+	{
+		BOOL bNameValid;
+		CString strAboutMenu;
+		bNameValid = strAboutMenu.LoadString(IDS_ABOUTBOX);
+		ASSERT(bNameValid);
+		if (!strAboutMenu.IsEmpty())
+		{
+			pSysMenu->AppendMenu(MF_SEPARATOR);
+			pSysMenu->AppendMenu(MF_STRING, IDM_ABOUTBOX, strAboutMenu);
+		}
+	}
+
+	// 设置此对话框的图标。  当应用程序主窗口不是对话框时，框架将自动
+	//  执行此操作
+	SetIcon(m_hIcon, TRUE);			// 设置大图标
+	SetIcon(m_hIcon, FALSE);		// 设置小图标
+
+	// TODO:  在此添加额外的初始化代码
+	//初始化标志位	
+	Data_Send_Flag = false;
+	Data_Receive_Flag = false;
+	videoflag = false;
+	frameload = false;
+	processedflag = false;
+	initflag = false;
+	trackedflag = false;
+	drawing_box = false;
+	gotBB = false;
+	tl = true;
+	capture = NULL;
+	status = true;
+	frames = 1;//记录已过去帧数 
+	detections = 1;//记录成功检测到的目标box数目
+	init_number = 0;
+	//-- 1. Load the cascade
+	face_cascade.load(face_cascade_name);
+	eyes_cascade.load(eyes_cascade_name);
+	largestComp = -1;
+	point0.x = 0;
+	point0.y = 0;
+	point1.x = 0;
+	point1.y = 0;
+	Point_Angle = 0;
+	Trajectory_P.reserve(10);//给长度不变，容量被置为10
+	///////////////////////////场地四区块中心点坐标初始化/////////////////////////
+	zuobiao_P[0].x = 12;
+	zuobiao_P[0].y = 34;
+	zuobiao_P[1].x = 12;
+	zuobiao_P[1].y = 34;
+	zuobiao_P[2].x = 12;
+	zuobiao_P[2].y = 34;
+	zuobiao_P[3].x = 12;
+	zuobiao_P[3].y = 34;
+	/////////////////////////////////////////////////////////////////////////////
+	maxCount = 500;	// 检测的最大特征数
+	qLevel = 0.01;	// 特征检测的等级
+	minDist = 10.0;	// 两特征点之间的最小距离
+	//BackgroundSubtractorMOG::BackgroundSubtractorMOG(int history, int nmixtures,double backgroundRatio, double noiseSigma = 0)
+	//其中history为使用历史帧的数目，nmixtures为混合高斯数量，backgroundRatio为背景比例，noiseSigma为噪声权重。
+	//	BackgroundSubtractorMOG::BackgroundSubtractorMOG(20, 10, 0.5 , false);
+
+	//BackgroundSubtractorMOG2::BackgroundSubtractorMOG2(int history, float varThreshold, bool bShadowDetection = true )
+	//history同上，varThreshold表示马氏平方距离上使用的来判断是否为背景的阈值（此值不影响背景更新速率），
+	//	bShadowDetection表示是否使用阴影检测（如果开启阴影检测，则mask中使用127表示阴影）。
+	BackgroundSubtractorMOG2::BackgroundSubtractorMOG2(20, 16, false);
+	/////////////////////////////////////发送串口初始化////////////////////////////////////////////////////////
+	CString str;
+	int com_i, com_j;
+	for (com_i = 0; com_i < 15; com_i++)
+	{
+		str.Format(_T("COM %d"), com_i + 1);
+		m_ComXuan.InsertString(com_i, str);
+	}
+	m_ComXuan.SetCurSel(0);//预置COM口
+	CString str1[] = { _T("300"), _T("600"), _T("1200"), _T("2400"), _T("4800"), _T("9600"), _T("19200"), _T("38400"), _T("43000"), _T("56000"), _T("57600"), _T("115200") };
+	for (com_j = 0; com_j < 12; com_j++)
+	{
+		int judge_tf = m_BodXuan.AddString(str1[com_j]);
+		if ((judge_tf == CB_ERR) || judge_tf == CB_ERRSPACE)
+		{
+			MessageBox(_T("Build Baud Error !"));
+		}
+	}
+	m_BodXuan.SetCurSel(11);	
+	/////////////////////////////////////接收串口初始化////////////////////////////////////////////////////////
+	CString str2;
+	int com_i2, com_j2;
+	for (com_i2 = 0; com_i2 < 15; com_i2++)
+	{
+		str2.Format(_T("COM %d"), com_i2 + 1);
+		m_ComXuan2.InsertString(com_i2, str2);
+	}
+	m_ComXuan2.SetCurSel(0);//预置COM口
+	CString str3[] = { _T("300"), _T("600"), _T("1200"), _T("2400"), _T("4800"), _T("9600"), _T("19200"), _T("38400"), _T("43000"), _T("56000"), _T("57600"), _T("115200") };
+	for (com_j2 = 0; com_j2 < 12; com_j2++)
+	{
+		int judge_tf2 = m_BodXuan2.AddString(str3[com_j2]);
+		if ((judge_tf2 == CB_ERR) || judge_tf2 == CB_ERRSPACE)
+		{
+			MessageBox(_T("Build Baud Error !"));
+		}
+	}
+	m_BodXuan2.SetCurSel(11);
+
+	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
+}
+
+void CNCURoboteamDlg::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFF0) == IDM_ABOUTBOX)
+	{
+		CAboutDlg dlgAbout;
+		dlgAbout.DoModal();
+	}
+	else
+	{
+		CDialog::OnSysCommand(nID, lParam);
+	}
+}
+
+// 如果向对话框添加最小化按钮，则需要下面的代码
+//  来绘制该图标。  对于使用文档/视图模型的 MFC 应用程序，
+//  这将由框架自动完成。
+
+void CNCURoboteamDlg::OnPaint()
+{
+	if (IsIconic())
+	{
+		CPaintDC dc(this); // 用于绘制的设备上下文
+
+		SendMessage(WM_ICONERASEBKGND, reinterpret_cast<WPARAM>(dc.GetSafeHdc()), 0);
+
+		// 使图标在工作区矩形中居中
+		int cxIcon = GetSystemMetrics(SM_CXICON);
+		int cyIcon = GetSystemMetrics(SM_CYICON);
+		CRect rect;
+		GetClientRect(&rect);
+		int x = (rect.Width() - cxIcon + 1) / 2;
+		int y = (rect.Height() - cyIcon + 1) / 2;
+
+		// 绘制图标
+		dc.DrawIcon(x, y, m_hIcon);
+	}
+	else
+	{
+		CDialog::OnPaint();
+	}
+}
+
+//当用户拖动最小化窗口时系统调用此函数取得光标
+//显示。
+HCURSOR CNCURoboteamDlg::OnQueryDragIcon()
+{
+	return static_cast<HCURSOR>(m_hIcon);
+}
+
+
+void CNCURoboteamDlg::OnBnClickedClose()
+{
+	// TODO: Add your control notification handler code here
+	videoflag = false;//关闭摄像头后，清摄像头标志位
+	if (processedflag == true)
+	{
+		processedflag = false;
+	}
+	
+	KillTimer(1);
+	KillTimer(2);//这里的2是上面Timer2的标识
+}
+
+
+void CNCURoboteamDlg::OnBnClickedOpen()
+{
+	// TODO: Add your control notification handler code here
+	HWND NCUWin = ::GetDlgItem(m_hWnd, IDC_VideoImage);
+	capture.open(0);//开启摄像头
+	capture.set(CV_CAP_PROP_FRAME_WIDTH, 340);
+	capture.set(CV_CAP_PROP_FRAME_HEIGHT, 240);
+
+	if (!capture.isOpened())
+	{
+		//警告摄像头未开启
+		AfxMessageBox(_T("摄像头未开启！"), MB_OKCANCEL | MB_ICONEXCLAMATION);
+	}
+	else
+	{
+		videoflag = true;
+		SetTimer(1, 25, NULL);//定时器1，定时时间和摄像机帧率一致	
+		m_facedata = _T(" ");
+		UpdateData(false);//更新数据
+	}
+}
+
+void CNCURoboteamDlg::OnTimer(UINT nIDEvent)
+{
+	switch (nIDEvent)
+	{
+	case 1:
+	{
+		if (videoflag == true)
+		{
+			//在Picture控件IDC_VideoImage中显示视频
+			capture >> frame;
+			std::vector<Rect> faces;
+			Mat frame_gray;
+			//////////////////////////Harris 角点检测///////////////////////////////////////////////
+			Mat gray;
+			cvtColor(frame, gray, CV_BGR2GRAY);
+
+			Mat cornerStrength;
+			cornerHarris(gray, cornerStrength, 3, 3, 0.01);
+
+			double maxStrength;
+			double minStrength;
+			// 找到图像中的最大、最小值
+			minMaxLoc(cornerStrength, &minStrength, &maxStrength);
+
+			Mat dilated;
+			Mat locaMax;
+			// 膨胀图像，最找出图像中全部的局部最大值点
+			dilate(cornerStrength, dilated, Mat());
+			// compare是一个逻辑比较函数，返回两幅图像中对应点相同的二值图像
+			compare(cornerStrength, dilated, locaMax, CMP_EQ);
+
+			Mat cornerMap;
+			double qualityLevel = 0.01;
+			double th = qualityLevel*maxStrength; // 阈值计算
+			threshold(cornerStrength, cornerMap, th, 255, THRESH_BINARY);
+			cornerMap.convertTo(cornerMap, CV_8U);
+			// 逐点的位运算
+			bitwise_and(cornerMap, locaMax, cornerMap);
+
+			drawCornerOnImage(frame, cornerMap);
+			////////////////////////////////////////////////////////////////////////////////////
+			point0.x = 0;
+			point0.y = 0;
+			cvtColor(frame, frame_gray, COLOR_BGR2GRAY);
+			equalizeHist(frame_gray, frame_gray);
+
+			//-- Detect faces
+			face_cascade.detectMultiScale(frame_gray, faces, 1.1, 2, 0, Size(80, 80));
+
+			for (size_t i = 0; i < faces.size(); i++)
+			{
+				Mat faceROI = frame_gray(faces[i]);
+				std::vector<Rect> eyes;
+
+				//-- In each face, detect eyes
+				eyes_cascade.detectMultiScale(faceROI, eyes, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(30, 30));
+				if (eyes.size() == 2)
+				{
+					//-- Draw the face
+					Point center(faces[i].x + faces[i].width / 2, faces[i].y + faces[i].height / 2);
+					ellipse(frame, center, Size(faces[i].width / 2, faces[i].height / 2), 0, 0, 360, Scalar(255, 0, 0), 2, 8, 0);
+					//用于数据传送到DataControl-Dialog/////
+					point0.x = center.x;
+					point0.y = center.y;
+					///////////////////////////////////////
+					for (size_t j = 0; j < eyes.size(); j++)
+					{ //-- Draw the eyes
+						Point eye_center(faces[i].x + eyes[j].x + eyes[j].width / 2, faces[i].y + eyes[j].y + eyes[j].height / 2);
+						int radius = cvRound((eyes[j].width + eyes[j].height)*0.25);
+						circle(frame, eye_center, radius, Scalar(255, 0, 255), 3, 8, 0);
+					}
+				}
+			}
+			/*
+			if ((point0.x != 0) && (point0.y != 0))
+			{
+				face_data.Format(_T("X = %d		Y = %d		"), point0.x, point0.y);
+				m_facedata += face_data;
+				this->SetDlgItemText(IDC_Face, m_facedata);//将字符串str中内容显示到ID为IDC_EDIT_RECV的编辑框
+				m_FaceControl.LineScroll(m_FaceControl.GetLineCount()-1);//为该编辑框的成员变量（也就是control类型的变量）//使用控件变量的一些成员函数设置滚动条的位置
+				UpdateData(false);//更新数据
+			}			
+			*/
+			if (pTD != NULL && point0.x != 0)
+			{
+				str_data.Format(_T("X = %d		Y = %d		"), point0.x, point0.y);
+				pTD->m_Data += str_data + _T("Z = 0 \r\n");
+			}
+			if (!frame.empty())
+			{
+				tracking(frame, result);
+			}
+			ImageToDC(result, IDC_VideoImage);
+		}
+	}
+	break;
+	case 2:
+	{
+		//Timer2的OnTimer需要做的事情
+		if (processedflag == true)
+		{
+			point1.x = 0;
+			point1.y = 0;
+			capture >> frame;
+			cvtColor(frame, frame, CV_RGB2GRAY);
+			Processing();
+			morphologyEx(fore_frame, fore_frame, MORPH_OPEN, closerect);//进行形态学开运算
+			/**********************************轮廓匹配*******************************************************/
+			/*
+			vector<vector<Point>> w, w1;
+			vector<Vec4i> hierarchy, hierarchy1;
+			findContours(fore_frame, w, hierarchy, RETR_CCOMP, CHAIN_APPROX_SIMPLE);//提取轮廓元素
+			//findContours(f1, w1, hierarchy1, RETR_CCOMP, CHAIN_APPROX_SIMPLE);
+			FileStorage fs("f.dat", FileStorage::WRITE);
+			fs << "f" << w1[0];
+			int idx = 0;
+			double ffff = matchShapes(w[0], w1[0], CV_CONTOURS_MATCH_I3, 1.0);//进行轮廓匹配
+			std::cout << ffff << std::endl;
+			*/
+			/***********************************************************************************************/
+			//bgSubtractor2.getBackgroundImage(back_ground);				
+			//findContours(fore_frame, contours, hierarchy, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE);
+			findContours(fore_frame, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
+			vector<RotatedRect> minRect(contours.size());
+			/// 计算矩
+			vector<Moments> mu(contours.size());
+			///  计算中心矩:
+			vector<Point2f> mc(contours.size());
+			//iterate through all the top-level contours
+			//draw each connected component with its own random color		
+			for (int idx = 0; idx < contours.size(); idx++)
+			{
+				//除去太长或者太短的轮廓(注：只是一个非常简单的滤除干扰)  
+				int cmin = 0;
+				int cmax = 100;
+				double whRatio_max = 10.0;//3//2.0//3.0
+				double whRatio_min = 0.5;//1.5
+
+				double dAreaMax = 280.0;//280
+				double dAreaMin = 0.0;//50	
+
+				double dConArea = fabs(contourArea(contours[idx]));
+				if (dConArea > dAreaMax)
+				{
+					contours.erase(contours.begin() + idx);
+					continue;
+				}
+				if (dConArea < dAreaMin)
+				{
+					contours.erase(contours.begin() + idx);
+					continue;
+				}
+				Rect aRect = boundingRect(contours[idx]);
+				if (((aRect.width / aRect.height) > whRatio_max) || ((aRect.width / aRect.height) < whRatio_min))
+				{
+					contours.erase(contours.begin() + idx);
+					continue;
+				}
+				double cLength = arcLength(contours[idx], true);
+				if ((cLength > cmax) || (cLength < cmin))
+				{
+					contours.erase(contours.begin() + idx);
+					continue;
+				}
+			}
+			Mat drawing = Mat::zeros(fore_frame.size(), CV_8UC3);
+			for (int idx = 0; idx < contours.size(); idx++)
+			{
+
+				Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
+				minRect[idx] = minAreaRect(Mat(contours[idx]));
+				mu[idx] = moments(contours[idx], false);// 计算矩
+				mc[idx] = Point2f(mu[idx].m10 / mu[idx].m00, mu[idx].m01 / mu[idx].m00);//  计算中心矩
+
+				drawContours(drawing, contours, idx, color, 2, 8, vector<Vec4i>(), 0, Point());
+				circle(drawing, mc[idx], 20, color, 2, 8, 0);
+				point1.x = mc[idx].x;
+				point1.y = mc[idx].y;
+				Point_Angle = minRect[idx].angle;
+
+				Point2f rect_points[4];
+				minRect[idx].points(rect_points);
+				for (int j = 0; j < 4; j++)
+				{
+					line(drawing, rect_points[j], rect_points[(j + 1) % 4], color, 1, 8);
+				}
+				largestComp++;
+				Trajectory_P.resize(largestComp + 10);
+				Trajectory_P[largestComp] = mc[idx];
+				for (int i = 0; i < largestComp; i++)
+				{
+					if (i == 0)
+					{
+						line(drawing, Trajectory_P[i], Trajectory_P[i], color, 2, 8);
+					}
+					else if ((Trajectory_P[i].x > 100) && (Trajectory_P[i].y < 380))
+					{
+						line(drawing, Trajectory_P[i - 1], Trajectory_P[i], color, 2, 8);
+					}
+					else
+					{
+						largestComp = -1;
+						Trajectory_P.clear();
+					}
+				}
+			}
+			//在Picture控件IDC_ProcessedImage中显示视频
+			ImageToDC(drawing, IDC_ProcessedImage);//显示背景滤除后的图像	
+
+			if ((point1.x != 0) && (point1.y != 0))
+			{
+				face_data.Format(_T("Y=%d     Z=%d     J=%0.f"), point1.x, point1.y, Point_Angle);
+				m_facedata += face_data;
+				m_facedata += "\r\n";
+				this->SetDlgItemText(IDC_Face, m_facedata);//将字符串str中内容显示到ID为IDC_EDIT_RECV的编辑框
+				m_FaceControl.LineScroll(m_FaceControl.GetLineCount(), 0);//为该编辑框的成员变量（也就是control类型的变量）//使用控件变量的一些成员函数设置滚动条的位置
+				UpdateData(false);//更新数据
+				if (Data_Send_Flag)
+				{
+					UpdateData(true);								//更新控件数据
+					m_MSCom.put_Output(COleVariant(m_facedata));	//把发送编辑框的数据发送出去
+				}
+			}
+		}					
+	}
+	break;
+	case 3:
+	{
+		this->SetDlgItemText(IDC_Data, pTD->m_Data);//将字符串str中内容显示到ID为IDC_EDIT_RECV的编辑框
+		pTD->m_Data_Control.LineScroll(pTD->m_Data_Control.GetLineCount());//m_recvshw为该编辑框的成员变量（也就是control类型的变量）//使用控件变量的一些成员函数设置滚动条的位置//更新数据
+		UpdateData(false);											//更新数据
+	}
+	break;
+	default:
+		break;
+	}
+	CDialog::OnTimer(nIDEvent);
+}
+
+void CNCURoboteamDlg::OnBnClickedOk()
+{
+	// TODO: Add your control notification handler code here
+	capture.release();
+	KillTimer(1);
+	KillTimer(2);//这里的2是上面Timer2的标识
+	CDialog::OnOK();
+}
+
+
+void CNCURoboteamDlg::OnBnClickedCancel()
+{
+	// TODO: Add your control notification handler code here
+	capture.release();
+	KillTimer(1);//这里的1是上面Timer1的标识
+	KillTimer(2);//这里的2是上面Timer2的标识
+	CDialog::OnCancel();
+}
+
+void CNCURoboteamDlg::ImageToDC(Mat &Frame, UINT ID_Picture)
+{
+	IplImage* Ima;
+	CRect rect;
+	CStatic* pStc;//标识图像显示的Picture控件
+	CDC* pDC;//视频显示控件设备上下文
+	HDC  hDC;//视频显示控件设备句柄
+	pStc = (CStatic *)GetDlgItem(ID_Picture);//ID_Picture为任意传入Picture控件ID
+	pStc->GetClientRect(&rect);//将CWind类客户区的坐标点传给矩形
+	pDC = pStc->GetDC();//得到Picture控件设备上下文
+	hDC = pDC->GetSafeHdc();//得到Picture控件设备上下文的句柄
+
+	if (pDC&&rect&&!Frame.empty())
+	{
+		uchar buffer[sizeof(BITMAPINFOHEADER) + 1024];
+		BITMAPINFO* bmi = (BITMAPINFO*)buffer;
+		int bmp_w = Frame.cols, bmp_h = Frame.rows;
+
+		BITMAPINFOHEADER* bmih = &(bmi->bmiHeader);
+		memset(bmih, 0, sizeof(*bmih));
+		bmih->biSize = sizeof(BITMAPINFOHEADER);
+		bmih->biWidth = bmp_w;
+		bmih->biHeight = -bmp_h;//-abs(Height)
+		bmih->biPlanes = 1;
+		bmih->biBitCount = IPL_DEPTH_8U*Frame.channels();
+		bmih->biCompression = BI_RGB;
+
+		if (IPL_DEPTH_8U*Frame.channels() == 8)
+		{
+			RGBQUAD* palette = bmi->bmiColors;//palette:调色板
+			int IMA_i;
+			for (IMA_i = 0; IMA_i < 255; IMA_i++)
+			{
+				palette[IMA_i].rgbBlue = palette[IMA_i].rgbGreen = palette[IMA_i].rgbRed = (BYTE)IMA_i;
+				palette[IMA_i].rgbReserved = 0;
+			}
+		}
+		if (rect.right - rect.left + 1 < bmp_w)
+		{
+			SetStretchBltMode(pDC->m_hDC, HALFTONE);//handle to device context;device context:设备上下文
+		}
+		else
+		{
+			SetStretchBltMode(pDC->m_hDC, COLORONCOLOR);//handle to device context
+		}
+		if (Frame.cols % 4 != 0 && Frame.isContinuous())
+		{
+			Ima = cvCreateImage(Frame.size(), 8, Frame.channels());
+			Frame.copyTo(Mat(Ima));
+			::StretchDIBits(pDC->m_hDC, rect.left, rect.top, rect.right - rect.left + 1, rect.bottom - rect.top + 1, 0, 0, bmp_w, bmp_h, Ima->imageData, bmi, DIB_RGB_COLORS, SRCCOPY);
+			cvReleaseImage(&Ima);
+		}
+		else
+		{
+			::StretchDIBits(pDC->m_hDC, rect.left, rect.top, rect.right - rect.left + 1, rect.bottom - rect.top + 1, 0, 0, bmp_w, bmp_h, Frame.data, bmi, DIB_RGB_COLORS, SRCCOPY);
+		}
+	}
+
+	ReleaseDC(pDC);
+	return;
+}
+
+void CNCURoboteamDlg::OnBnClickedStartprocessed()
+{
+	// TODO: Add your control notification handler code here
+	if (videoflag == true)
+	{
+		//满足打开摄像头后，才允许处理
+		if (!frame.empty())
+		{
+			processedflag = true;
+			SetTimer(2, 25, NULL);//定时器2，定时时间和摄像机帧率一致	
+		}
+	}
+	else
+	{
+		//警告摄像头未开启
+		AfxMessageBox(_T("摄像头未开启！"), MB_OKCANCEL | MB_ICONEXCLAMATION);
+	}
+
+}
+
+void CNCURoboteamDlg::Processing()
+{
+	/*opencv背景建模，运动物体检测   视频进行背景建模，然后差分得出运动物体*/
+	/******************************opencv1.x版本的背景差分法****************************************/
+	//	back_frame.create(frame.rows, frame.cols, CV_8UC1);
+	//fore_frame.create(frame.rows, frame.cols, CV_8UC1);
+	//先高斯滤波，以平滑图像，
+	//GaussianBlur(frame, frame, frame.size(), 0);
+	//当前帧和背景图相减
+	//absdiff(frame,back_frame,fore_frame );
+	//二值化前景图（含运动物体）
+	//threshold(fore_frame, fore_frame, 60, 255.0, CV_THRESH_BINARY);
+	//		CvMat frame_t = frame; CvMat back_frame_t = back_frame;
+	//		cvRunningAvg(&frame_t,&back_frame_t,0.003, 0);
+	//		Mat::Mat(&back_frame_t,false); /*类似IplImage -> Mat，可选择是否复制数据*/
+	/******************************opencv1.x版本的背景差分法****************************************/
+	//运动前景检测，并更新背景
+
+	//	bgSubtractor(frame,back_frame,0.01);
+	bgSubtractor2(frame, back_frame, 0.01);//更新速率，0.001时比较慢
+
+	//进行形态学滤波，去掉噪音
+	erode(back_frame, fore_frame, Mat());
+	dilate(fore_frame, fore_frame, Mat());
+}
+
+
+void CNCURoboteamDlg::OnBnClickedTrackinit()
+{
+	// TODO: Add your control notification handler code here
+	initflag = true;
+	init_number = 1;
+}
+
+
+void CNCURoboteamDlg::OnBnClickedTrackstart()
+{
+	// TODO: Add your control notification handler code here	
+	if (gotBB == true)
+	{
+		trackedflag = true;
+		initflag = false;
+
+	}
+	else
+	{
+		//警告没有初始化追踪
+		AfxMessageBox(_T("没有初始化追踪！"), MB_OKCANCEL | MB_ICONEXCLAMATION);
+	}
+}
+
+void CNCURoboteamDlg::OnBnClickedDatapanel()
+{
+	// TODO: Add your control notification handler code here
+	//采用成员变量创建一个非模态对话框用来做数据显示和发送控制
+	if (pTD == NULL)
+	{
+		pTD = new CDataControlDialog(); //给指针分配内存  
+	}
+	pTD->Create(IDD_DataControl, this); //创建一个非模态对话框 	
+	pTD->ShowWindow(SW_SHOW); //显示非模态对话框 
+}
+
+//bounding box mouse callback 
+//鼠标的响应就是得到目标区域的范围，用鼠标选中bounding box。
+void CNCURoboteamDlg::OnMouseMove(UINT nFlags, CPoint point)
+{
+	GetDlgItem(IDC_VideoImage)->GetWindowRect(videorect);
+	ScreenToClient(&videorect);
+	if (point.x >= videorect.left && point.x <= videorect.right && point.y >= videorect.top && point.y <= videorect.bottom)
+	{
+		if (drawing_box)
+		{
+			CClientDC dc(this);
+			CPen pen(PS_SOLID, 2, RGB(255, 0, 0));
+			CPen *penold = dc.SelectObject(&pen);
+			CBrush *pbrush = CBrush::FromHandle((HBRUSH)GetStockObject(NULL_BRUSH));
+			CBrush *pbrold = dc.SelectObject(pbrush);
+			if (m_d = true)
+			{
+				dc.SetROP2(R2_NOT);//绘制模式
+				dc.Rectangle(CRect(m_ptstart, m_ptold));
+				dc.MoveTo(m_ptstart);
+				dc.Rectangle(CRect(m_ptstart, point));
+				dc.SelectObject(penold);
+				dc.SelectObject(pbrold);
+				m_ptold = point;
+			}
+
+			//AfxMessageBox(_T("MouseMove！"), MB_OKCANCEL | MB_ICONEXCLAMATION);
+			x = point.x;
+			y = point.y;
+			box.width = x - box.x;
+			box.height = y - box.y;
+		}
+	}
+	CDialog::OnMouseMove(nFlags, point);
+}
+
+void CNCURoboteamDlg::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	GetDlgItem(IDC_VideoImage)->GetWindowRect(videorect);
+	ScreenToClient(&videorect);
+	if (point.x >= videorect.left && point.x <= videorect.right && point.y >= videorect.top && point.y <= videorect.bottom)
+	{
+		//AfxMessageBox(_T("LButtonDown！"), MB_OKCANCEL | MB_ICONEXCLAMATION);
+		m_ptstart = point;
+		m_ptold = point;
+		m_d = true;
+
+		drawing_box = true;
+		x = point.x;
+		y = point.y;
+		box = Rect(x, y, 0, 0);
+	}
+	CDialog::OnLButtonDown(nFlags, point);
+}
+
+void CNCURoboteamDlg::OnLButtonUp(UINT nFlags, CPoint point)
+{
+	GetDlgItem(IDC_VideoImage)->GetWindowRect(videorect);
+	ScreenToClient(&videorect);
+	if (point.x >= videorect.left && point.x <= videorect.right && point.y >= videorect.top && point.y <= videorect.bottom)
+	{
+		//AfxMessageBox(_T("LButtonUp！"), MB_OKCANCEL | MB_ICONEXCLAMATION);
+		drawing_box = false;
+		CClientDC dc(this);
+		CPen pen(PS_SOLID, 2, RGB(255, 0, 0));
+		CPen *penold = dc.SelectObject(&pen);
+		CBrush *pbrush = CBrush::FromHandle((HBRUSH)GetStockObject(NULL_BRUSH));
+		CBrush *pbrold = dc.SelectObject(pbrush);
+		if (m_d = true)
+		{
+			dc.SetROP2(R2_NOT);
+			dc.Rectangle(CRect(m_ptstart, m_ptold));
+			dc.SetROP2(R2_COPYPEN);
+			dc.Rectangle(CRect(m_ptstart, point));
+			dc.SelectObject(penold);
+			dc.SelectObject(pbrold);
+		}
+
+		if (box.width < 0)
+		{
+			box.x += box.width;
+			box.width *= -1;
+		}
+		if (box.height < 0)
+		{
+			box.y += box.height;
+			box.height *= -1;
+		}
+		CString str;
+		str.Format(_T("%d,%d,%d,%d"), box.x, box.y, box.height, box.width);
+		MessageBox(str);
+		gotBB = true;//已经获得bounding box		
+	}
+	CDialog::OnLButtonUp(nFlags, point);
+}
+
+
+void CNCURoboteamDlg::OnBnClickedComkou()
+{
+	// TODO: Add your control notification handler code here
+	CString str, str1, n;
+	GetDlgItemText(IDC_COMKOU, str);
+	CWnd *h1;
+	h1 = GetDlgItem(IDC_COMKOU);		//指向控件的Caption
+	if (!m_MSCom.get_PortOpen())
+	{
+		m_BodXuan.GetLBText(m_BodXuan.GetCurSel(), str1);//取得所选的字符，并放在str1里面
+		str1 = str1 + ',' + 'n' + ',' + '8' + ',' + '1';//增加校验位，如果不是“n，8，1”，直接在程序里改
+
+		m_MSCom.put_CommPort(m_ComXuan.GetCurSel() + 1);	//选择串口
+		m_MSCom.put_InputMode(1);							//设置输入方式为二进制方式
+		m_MSCom.put_Settings(str1);						//波特率为（无校验位，8数据位，1个停止位）
+		m_MSCom.put_InputLen(65536);						//设置当前接受区数据长度为65536
+		m_MSCom.put_RThreshold(1);							//缓冲区一个字符引发事件
+		m_MSCom.put_RTSEnable(1);							//设置RT允许
+
+		m_MSCom.put_PortOpen(true);						//打开串口
+		if (m_MSCom.get_PortOpen())
+		{
+			str = _T("关闭发送串口");
+			UpdateData(true);
+			h1->SetWindowTextW(str);							//改变按钮名称为“关闭串口”
+		}
+		else
+		{
+			m_MSCom.put_PortOpen(false);
+			if (str != _T("打开发送串口"))
+			{
+				Data_Send_Flag = false;
+				str = _T("打开发送串口");
+				UpdateData(true);
+				h1->SetWindowTextW(str);						//改变按钮名称为打开串口
+			}
+		}
+
+	}
+	else
+	{
+		m_MSCom.put_PortOpen(false);
+		if (str != _T("打开发送串口"))
+		{
+			Data_Send_Flag = false;
+			str = _T("打开发送串口");
+			UpdateData(true);
+			h1->SetWindowTextW(str);						//改变按钮名称为打开串口
+		}
+	}
+}
+
+
+void CNCURoboteamDlg::OnBnClickedComsend()
+{
+	// TODO: Add your control notification handler code here
+	if (m_MSCom.get_PortOpen())
+	{
+		Data_Send_Flag = true;
+	}
+	else
+	{
+		//警告没有初始化追踪
+		AfxMessageBox(_T("没有打开发送串口！"), MB_OKCANCEL | MB_ICONEXCLAMATION);
+	}
+}
+BEGIN_EVENTSINK_MAP(CNCURoboteamDlg, CDialog)
+	ON_EVENT(CNCURoboteamDlg, IDC_MSCOMM1, 1, CNCURoboteamDlg::OnCommMscomm1, VTS_NONE)
+	ON_EVENT(CNCURoboteamDlg, IDC_MSCOMM2, 1, CNCURoboteamDlg::OnCommMscomm2, VTS_NONE)
+END_EVENTSINK_MAP()
+
+
+void CNCURoboteamDlg::OnCommMscomm1()
+{
+	// TODO: Add your message handler code here
+	if (m_MSCom.get_CommEvent() == 2)
+	{
+		char str[65536] = { 0 };
+		long k;
+		VARIANT InputData = m_MSCom.get_Input();			//读缓冲区
+		COleSafeArray fs;
+		fs = InputData;											//VARIANT型变量转换为COleSafeArray型变量
+		for (k = 0; k < fs.GetOneDimSize(); k++)
+		{
+			fs.GetElement(&k, str + k);							//转换为BYTE型数组
+		}
+		m_facedata += str;											//接收到编辑框里
+
+		UpdateData(false);
+	}
+}
+
+
+void CNCURoboteamDlg::OnCommMscomm2()
+{
+	// TODO: Add your message handler code here
+	if (m_MSCom2.get_CommEvent() == 2)
+	{
+		char str[65536] = { 0 };
+		long k;
+		VARIANT InputData = m_MSCom2.get_Input();			//读缓冲区
+		COleSafeArray fs;
+		fs = InputData;											//VARIANT型变量转换为COleSafeArray型变量
+		for (k = 0; k < fs.GetOneDimSize(); k++)
+		{
+			fs.GetElement(&k, str + k);							//转换为BYTE型数组
+		}
+		m_facedata2 += str;											//接收到编辑框里
+		m_facedata2 += "\r\n";
+
+		UpdateData(false);
+	}
+}
+
+
+void CNCURoboteamDlg::OnBnClickedComkou2()
+{
+	// TODO: Add your control notification handler code here
+	CString str, str1, n;
+	GetDlgItemText(IDC_COMKOU2, str);
+	CWnd *h1;
+	h1 = GetDlgItem(IDC_COMKOU2);		//指向控件的Caption
+	if (!m_MSCom2.get_PortOpen())
+	{
+		m_BodXuan2.GetLBText(m_BodXuan2.GetCurSel(), str1);//取得所选的字符，并放在str1里面
+		str1 = str1 + ',' + 'n' + ',' + '8' + ',' + '1';//增加校验位，如果不是“n，8，1”，直接在程序里改
+
+		m_MSCom2.put_CommPort(m_ComXuan2.GetCurSel() + 1);	//选择串口
+		m_MSCom2.put_InputMode(1);							//设置输入方式为二进制方式
+		m_MSCom2.put_Settings(str1);						//波特率为（无校验位，8数据位，1个停止位）
+		m_MSCom2.put_InputLen(65536);						//设置当前接受区数据长度为65536
+		m_MSCom2.put_RThreshold(1);							//缓冲区一个字符引发事件
+		m_MSCom2.put_RTSEnable(1);							//设置RT允许
+
+		m_MSCom2.put_PortOpen(true);						//打开串口
+		if (m_MSCom2.get_PortOpen())
+		{
+			str = _T("关闭接收串口");
+			UpdateData(true);
+			h1->SetWindowTextW(str);							//改变按钮名称为“关闭串口”
+		}
+		else
+		{
+			m_MSCom2.put_PortOpen(false);
+			if (str != _T("打开接收串口"))
+			{
+				Data_Receive_Flag = false;
+				str = _T("打开接收串口");
+				UpdateData(true);
+				h1->SetWindowTextW(str);						//改变按钮名称为打开串口
+			}
+		}
+
+	}
+	else
+	{
+		m_MSCom2.put_PortOpen(false);
+		if (str != _T("打开接收串口"))
+		{
+			Data_Receive_Flag = false;
+			str = _T("打开接收串口");
+			UpdateData(true);
+			h1->SetWindowTextW(str);						//改变按钮名称为打开串口
+		}
+	}
+}
+
+
+void CNCURoboteamDlg::OnBnClickedComsend2()
+{
+	// TODO: Add your control notification handler code here
+	if (m_MSCom2.get_PortOpen())
+	{
+		Data_Receive_Flag = true;
+	}
+	else
+	{
+		//警告没有初始化追踪
+		AfxMessageBox(_T("没有打开接收串口！"), MB_OKCANCEL | MB_ICONEXCLAMATION);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////
+// function: addNewPoints
+// brief: 检测新点是否应该被添加
+// parameter:
+// return: 是否被添加标志
+//////////////////////////////////////////////////////////////////////////
+bool CNCURoboteamDlg::addNewPoints()
+{
+	return points[0].size() <= 10;
+}
+
+//////////////////////////////////////////////////////////////////////////
+// function: acceptTrackedPoint
+// brief: 决定哪些跟踪点被接受
+// parameter:
+// return:
+//////////////////////////////////////////////////////////////////////////
+bool CNCURoboteamDlg::acceptTrackedPoint(int i)
+{
+	return Status[i] && ((abs(points[0][i].x - points[1][i].x) + abs(points[0][i].y - points[1][i].y)) > 2);
+}
+//////////////////////////////////////////////////////////////////////////
+// function: tracking
+// brief: 跟踪
+// parameter: frame	输入的视频帧
+//			  output 有跟踪结果的视频帧
+// return: void
+//////////////////////////////////////////////////////////////////////////
+void CNCURoboteamDlg::tracking(Mat &frame, Mat &output)
+{
+	cvtColor(frame, gray, CV_BGR2GRAY);
+	frame.copyTo(output);
+	// 添加特征点
+	if (addNewPoints())
+	{
+		goodFeaturesToTrack(gray, features, maxCount, qLevel, minDist);
+		points[0].insert(points[0].end(), features.begin(), features.end());
+		initial.insert(initial.end(), features.begin(), features.end());
+	}
+
+	if (gray_prev.empty())
+	{
+		gray.copyTo(gray_prev);
+	}
+	// l-k光流法运动估计
+	calcOpticalFlowPyrLK(gray_prev, gray, points[0], points[1], Status, err);
+	// 去掉一些不好的特征点
+	int k = 0;
+	for (size_t i = 0; i<points[1].size(); i++)
+	{
+		if (acceptTrackedPoint(i))
+		{
+			initial[k] = initial[i];
+			points[1][k++] = points[1][i];
+		}
+	}
+	points[1].resize(k);
+	initial.resize(k);
+	// 显示特征点和运动轨迹
+	for (size_t i = 0; i<points[1].size(); i++)
+	{
+		line(output, initial[i], points[1][i], Scalar(0, 0, 255));
+		circle(output, points[1][i], 3, Scalar(255, 0, 0), -1);
+	}
+
+	// 把当前跟踪结果作为下一此参考
+	swap(points[1], points[0]);
+	swap(gray_prev, gray);
+
+}
+
+void CNCURoboteamDlg::drawCornerOnImage(Mat& image, const Mat&binary)
+{
+	Mat_<uchar>::const_iterator it = binary.begin<uchar>();
+	Mat_<uchar>::const_iterator itd = binary.end<uchar>();
+	for (int i = 0; it != itd; it++, i++)
+	{
+		if (*it)
+			circle(image, Point(i%image.cols, i / image.cols), 3, Scalar(0, 255, 0), 1);
+	}
+}
+
+void CNCURoboteamDlg::OnEnChangeFace()
+{
+	// TODO:  If this is a RICHEDIT control, the control will not
+	// send this notification unless you override the CDialog::OnInitDialog()
+	// function and call CRichEditCtrl().SetEventMask()
+	// with the ENM_CHANGE flag ORed into the mask.
+
+	// TODO:  Add your control notification handler code here
+}
